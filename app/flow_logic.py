@@ -46,6 +46,9 @@ from app.messages.content import (
     BROADCAST_FOLLOWUP_TEXT,
     BROADCAST_BUTTONS,
     MEDIA_URLS,
+    TALK_TO_US_INTRO,
+    BRANCH_CONTACT_MENU,
+    BRANCH_CONTACTS,
 )
 from app.storage.db import get_or_create_session, update_session_state
 
@@ -173,6 +176,37 @@ def handle_nss(phone: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Talk to Us — Branch Contact Handlers
+# ─────────────────────────────────────────────────────────────────────
+
+def send_branch_contact_menu(phone: str) -> None:
+    """Send the branch selector list for Talk to Us."""
+    send_text(phone, TALK_TO_US_INTRO)
+    send_list(
+        to=phone,
+        header=BRANCH_CONTACT_MENU["header"],
+        body=BRANCH_CONTACT_MENU["body"],
+        footer=BRANCH_CONTACT_MENU["footer"],
+        button_text=BRANCH_CONTACT_MENU["button_text"],
+        sections=BRANCH_CONTACT_MENU["sections"],
+    )
+    update_session_state(phone, "talk_to_us")
+
+
+def handle_talk_to_us(phone: str) -> None:
+    """Show the branch contact selector menu."""
+    send_branch_contact_menu(phone)
+
+
+def handle_branch_contact(phone: str, branch_id: str) -> None:
+    """Send the coordinator contacts for a specific branch."""
+    contact_text = BRANCH_CONTACTS.get(branch_id, "Contact info not available.")
+    send_text(phone, f"📞 *Faculty Coordinator Contacts*\n\n{contact_text}")
+    send_text(phone, RETURN_PROMPT)
+    update_session_state(phone, branch_id)
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Handler Registry — maps button/list IDs to handler functions
 # ─────────────────────────────────────────────────────────────────────
 
@@ -189,7 +223,12 @@ HANDLER_MAP: dict[str, callable] = {
     "canteen": handle_canteen,
     "ncc": handle_ncc,
     "nss": handle_nss,
+    "talk_to_us": handle_talk_to_us,
 }
+
+# Dynamically register all branch contact IDs
+for _branch_id in BRANCH_CONTACTS:
+    HANDLER_MAP[_branch_id] = lambda phone, bid=_branch_id: handle_branch_contact(phone, bid)
 
 
 # ─────────────────────────────────────────────────────────────────────

@@ -88,6 +88,11 @@ MAIN_MENU_SECTIONS = [
                 "title": "🏫 Facilities",
                 "description": "Hostel, bus, canteen, sports & more",
             },
+            {
+                "id": "talk_to_us",
+                "title": "📞 Talk to Us",
+                "description": "Branch-wise faculty contacts",
+            },
         ],
     },
 ]
@@ -151,15 +156,16 @@ BROADCAST_BUTTONS = [
 # Replace these with your actual publicly-hosted URLs before deploying.
 # ─────────────────────────────────────────────────────────────────────
 
+_GITHUB_RAW = "https://raw.githubusercontent.com/ironman1947/dyp-admissions-bot/main/media"
+
 MEDIA_URLS = {
-    "fee_structure": "https://your-host.com/media/fee_structure_2025_26.jpg",
-    "placement_brochure": "https://your-host.com/media/placement_brochure_2025.pdf",
-    "sports_achievements": "https://your-host.com/media/sports_achievements.jpg",
-    "nss_activities": "https://your-host.com/media/nss_rural_internship.jpg",
-    "admission_documents": "https://your-host.com/media/admission_documents_2026_27.jpg",
-    "contact_info": "https://your-host.com/media/contacts.jpg",
-    "hostel_info": "https://your-host.com/media/hostel.jpg",
-    "campus_tour": "https://your-host.com/media/campus_tour.mp4",
+    "fee_structure": f"{_GITHUB_RAW}/Fee.jpeg",
+    "placement_brochure": f"{_GITHUB_RAW}/Placement%20Broucher%20SW.pdf",
+    "sports_achievements": f"{_GITHUB_RAW}/Sports.jpeg",
+    "nss_activities": f"{_GITHUB_RAW}/NSS.jpeg",
+    "admission_documents": f"{_GITHUB_RAW}/Addmission%20.jpeg",
+    "contact_info": f"{_GITHUB_RAW}/contact%20.jpeg",
+    "hostel_info": f"{_GITHUB_RAW}/hostel_image.jpeg",
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -275,6 +281,84 @@ NSS_TEXT = (
     "🎓 NSS develops leadership, social awareness, and earns "
     "activity points for your resume."
 )
+
+# ─────────────────────────────────────────────────────────────────────
+# TALK TO US — Branch Contact Sub-Menu
+# ─────────────────────────────────────────────────────────────────────
+
+TALK_TO_US_INTRO = "📞 Talk to Us — Admission Support\n\nSelect your branch below to get the right coordinator's contact."
+
+BRANCH_CONTACT_MENU = {
+    "header": "Talk to Us",
+    "body": "Please select your branch to get your faculty coordinator's contact:",
+    "footer": "DYPCET Admission Support",
+    "button_text": "Select Branch",
+    "sections": [
+        {
+            "title": "Engineering Branches",
+            "rows": [
+                {"id": "contact_chemical", "title": "Chemical Engineering", "description": "2 coordinators"},
+                {"id": "contact_civil", "title": "Civil Engineering", "description": "4 coordinators"},
+                {"id": "contact_cse", "title": "Computer Science & Engg", "description": "4 coordinators"},
+                {"id": "contact_aiml", "title": "CSE (AI & ML)", "description": "3 coordinators"},
+                {"id": "contact_ds", "title": "CSE (Data Science)", "description": "3 coordinators"},
+                {"id": "contact_entc", "title": "Electronics & Telecomm", "description": "2 coordinators"},
+                {"id": "contact_mech", "title": "Mechanical Engineering", "description": "3 coordinators"},
+                {"id": "contact_fye", "title": "First Year Engineering", "description": "2 coordinators"},
+            ],
+        }
+    ],
+}
+
+BRANCH_CONTACTS = {
+    "contact_chemical": (
+        "*Chemical Engineering*\n\n"
+        "Dr. Rahul Patil: 9823167767\n"
+        "Mr. Kiran Patil: 9028397585"
+    ),
+    "contact_civil": (
+        "*Civil Engineering*\n\n"
+        "Mr. Shivaprasad Chavan: 8999486862\n"
+        "Mrs. Amruta Pawar: 7387414938\n"
+        "Mr. Yogesh Kumbhar: 9552594509\n"
+        "Mr. Sudarshan Salokhe: 9766167240"
+    ),
+    "contact_cse": (
+        "*Computer Science & Engineering*\n\n"
+        "Mrs. Ketaki Bhosale: 9158142252\n"
+        "Dr. Sunny Mohite: 9371041188\n"
+        "Dr. Ajinkya Yadav: 9665784708\n"
+        "Mrs. Nandini Patil: 9850067707"
+    ),
+    "contact_aiml": (
+        "*CSE (Artificial Intelligence & Machine Learning)*\n\n"
+        "Mrs. Shamal Desai: 9420290704\n"
+        "Dr. Sachin Takmare: 9960843406\n"
+        "Dr. Tanvi Patil: 9503489655"
+    ),
+    "contact_ds": (
+        "*CSE (Data Science)*\n\n"
+        "Mr. Milind Vadagave: 9665407252\n"
+        "Mr. Swapnil Powar: 9970224686\n"
+        "Mrs. Goutami Vadagave: 9067953313"
+    ),
+    "contact_entc": (
+        "*Electronics & Telecommunication*\n\n"
+        "Mr. S. R. Khot: 9822501956\n"
+        "Mrs. Pranjal Farakte: 7887719998"
+    ),
+    "contact_mech": (
+        "*Mechanical Engineering*\n\n"
+        "Mr. Viraj Pasare: 9960518701\n"
+        "Mr. Yogesh Chougule: 9890029004\n"
+        "Dr. Shubhada Warake: 9960462441"
+    ),
+    "contact_fye": (
+        "*First Year Engineering*\n\n"
+        "Mrs. Shamim Bhai: 9823655577\n"
+        "Mr. Sanket Shinde: 8087798728"
+    ),
+}
 
 # ─────────────────────────────────────────────────────────────────────
 # RETURN PROMPT (shown after every leaf response)
