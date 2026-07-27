@@ -113,48 +113,57 @@ def handle_welcome(phone: str) -> None:
 
 
 def handle_freeze_admission(phone: str) -> None:
-    """User chose to freeze admission — show acknowledgment then main menu."""
-    send_text(phone, ACK_FREEZE)
-    send_main_menu(phone)
+    """User chose to freeze admission — merge ACK + menu into one API call."""
+    send_list(
+        to=phone,
+        header=MAIN_MENU_HEADER,
+        body=ACK_FREEZE + "\n\n" + MAIN_MENU_BODY,
+        footer=MAIN_MENU_FOOTER,
+        button_text=MAIN_MENU_BUTTON,
+        sections=MAIN_MENU_SECTIONS,
+    )
+    update_session_state(phone, "main")
 
 
 def handle_explore_options(phone: str) -> None:
-    """User chose to explore options — show acknowledgment then main menu."""
-    send_text(phone, ACK_EXPLORE)
-    send_main_menu(phone)
+    """User chose to explore options — merge ACK + menu into one API call."""
+    send_list(
+        to=phone,
+        header=MAIN_MENU_HEADER,
+        body=ACK_EXPLORE + "\n\n" + MAIN_MENU_BODY,
+        footer=MAIN_MENU_FOOTER,
+        button_text=MAIN_MENU_BUTTON,
+        sections=MAIN_MENU_SECTIONS,
+    )
+    update_session_state(phone, "main")
 
 
 def handle_about(phone: str) -> None:
-    """Send the About DYPCET info text."""
-    send_text(phone, ABOUT_TEXT)
-    send_text(phone, RETURN_PROMPT)
+    """Send the About DYPCET info text — single call with return prompt appended."""
+    send_text(phone, ABOUT_TEXT + "\n\n" + RETURN_PROMPT)
     update_session_state(phone, "about")
 
 
 def handle_fee(phone: str) -> None:
-    """Send the fee structure image with caption."""
-    send_image(phone, image_url=MEDIA_URLS["fee_structure"], caption=FEE_CAPTION)
-    send_text(phone, RETURN_PROMPT)
+    """Send the fee structure image — return prompt merged into caption."""
+    send_image(phone, image_url=MEDIA_URLS["fee_structure"], caption=FEE_CAPTION + "\n\n" + RETURN_PROMPT)
     update_session_state(phone, "fee")
 
 
 def handle_placements(phone: str) -> None:
-    """Send placement stats text and the placement brochure PDF."""
-    send_text(phone, PLACEMENTS_TEXT)
+    """Send the placement brochure PDF — stats + return prompt merged into caption."""
     send_document(
         phone,
         document_url=MEDIA_URLS["placement_brochure"],
         filename="DYPCET_Placement_Brochure_2025.pdf",
-        caption="📄 DYPCET Placement Brochure 2025",
+        caption=PLACEMENTS_TEXT + "\n\n" + RETURN_PROMPT,
     )
-    send_text(phone, RETURN_PROMPT)
     update_session_state(phone, "placements")
 
 
 def handle_admission(phone: str) -> None:
-    """Send the admission process image with document requirements."""
-    send_image(phone, image_url=MEDIA_URLS["admission_documents"], caption=ADMISSION_CAPTION)
-    send_text(phone, RETURN_PROMPT)
+    """Send the admission process image — return prompt merged into caption."""
+    send_image(phone, image_url=MEDIA_URLS["admission_documents"], caption=ADMISSION_CAPTION + "\n\n" + RETURN_PROMPT)
     update_session_state(phone, "admission")
 
 
@@ -164,37 +173,32 @@ def handle_facilities(phone: str) -> None:
 
 
 def handle_bus(phone: str) -> None:
-    """Send bus transport information."""
-    send_text(phone, BUS_TEXT)
-    send_text(phone, RETURN_PROMPT)
+    """Send bus transport information — single call with return prompt appended."""
+    send_text(phone, BUS_TEXT + "\n\n" + RETURN_PROMPT)
     update_session_state(phone, "bus")
 
 
 def handle_hostels(phone: str) -> None:
-    """Send hostel information with image."""
-    send_image(phone, image_url=MEDIA_URLS["hostel_info"], caption=HOSTELS_TEXT)
-    send_text(phone, RETURN_PROMPT)
+    """Send hostel information — return prompt merged into caption."""
+    send_image(phone, image_url=MEDIA_URLS["hostel_info"], caption=HOSTELS_TEXT + "\n\n" + RETURN_PROMPT)
     update_session_state(phone, "hostels")
 
 
 def handle_canteen(phone: str) -> None:
-    """Send canteen/mess facility information."""
-    send_text(phone, CANTEEN_TEXT)
-    send_text(phone, RETURN_PROMPT)
+    """Send canteen/mess facility information — single call with return prompt appended."""
+    send_text(phone, CANTEEN_TEXT + "\n\n" + RETURN_PROMPT)
     update_session_state(phone, "canteen")
 
 
 def handle_ncc(phone: str) -> None:
-    """Send NCC information."""
-    send_text(phone, NCC_TEXT)
-    send_text(phone, RETURN_PROMPT)
+    """Send NCC information — single call with return prompt appended."""
+    send_text(phone, NCC_TEXT + "\n\n" + RETURN_PROMPT)
     update_session_state(phone, "ncc")
 
 
 def handle_nss(phone: str) -> None:
-    """Send NSS and rural internship information with image."""
-    send_image(phone, image_url=MEDIA_URLS["nss_activities"], caption=NSS_TEXT)
-    send_text(phone, RETURN_PROMPT)
+    """Send NSS information — return prompt merged into caption."""
+    send_image(phone, image_url=MEDIA_URLS["nss_activities"], caption=NSS_TEXT + "\n\n" + RETURN_PROMPT)
     update_session_state(phone, "nss")
 
 
@@ -203,12 +207,11 @@ def handle_nss(phone: str) -> None:
 # ─────────────────────────────────────────────────────────────────────
 
 def send_branch_contact_menu(phone: str) -> None:
-    """Send the branch selector list for Talk to Us."""
-    send_text(phone, TALK_TO_US_INTRO)
+    """Send the branch selector list — intro merged into body for single API call."""
     send_list(
         to=phone,
         header=BRANCH_CONTACT_MENU["header"],
-        body=BRANCH_CONTACT_MENU["body"],
+        body=TALK_TO_US_INTRO + "\n\n" + BRANCH_CONTACT_MENU["body"],
         footer=BRANCH_CONTACT_MENU["footer"],
         button_text=BRANCH_CONTACT_MENU["button_text"],
         sections=BRANCH_CONTACT_MENU["sections"],
@@ -222,10 +225,9 @@ def handle_talk_to_us(phone: str) -> None:
 
 
 def handle_branch_contact(phone: str, branch_id: str) -> None:
-    """Send the coordinator contacts for a specific branch."""
+    """Send coordinator contacts — return prompt appended for single API call."""
     contact_text = BRANCH_CONTACTS.get(branch_id, "Contact info not available.")
-    send_text(phone, f"📞 *Faculty Coordinator Contacts*\n\n{contact_text}")
-    send_text(phone, RETURN_PROMPT)
+    send_text(phone, f"📞 *Faculty Coordinator Contacts*\n\n{contact_text}\n\n" + RETURN_PROMPT)
     update_session_state(phone, branch_id)
 
 
