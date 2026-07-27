@@ -43,21 +43,27 @@ def _e164(phone: str) -> str:
 
 
 def _post(payload: dict) -> requests.Response:
-    """POST a message payload to WaSender. Logs errors but lets caller handle raises."""
-    try:
-        response = requests.post(API_URL, headers=HEADERS, json=payload, timeout=15)
-        response.raise_for_status()
-        return response
-    except requests.HTTPError as exc:
-        logger.error(
-            "WaSender API HTTP error: %s — Response body: %s",
-            exc,
-            exc.response.text if exc.response is not None else "N/A",
+    """POST a message payload to WaSender. Returns the response without raising.
+
+    Errors are logged clearly:
+      - 429 → free-trial rate limit warning (60 s between messages)
+      - Other HTTP errors → logged with full response body for debugging
+    The function never raises so background tasks always finish cleanly.
+    """
+    response = requests.post(API_URL, headers=HEADERS, json=payload, timeout=15)
+    if response.status_code == 429:
+        logger.warning(
+            "⚠️ WaSender rate limit hit (429) — wait 60 s before the next message. "
+            "Payload was: %s",
+            payload,
         )
-        raise
-    except requests.RequestException as exc:
-        logger.error("WaSender API request error: %s", exc)
-        raise
+    elif not response.ok:
+        logger.error(
+            "WaSender API error %s — Response: %s",
+            response.status_code,
+            response.text,
+        )
+    return response
 
 
 # ─────────────────────────────────────────────────────────────────────
