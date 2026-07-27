@@ -1,24 +1,27 @@
 """
-Master routing engine for the DYP Admissions WhatsApp Bot.
+Master routing engine for the DYP Admissions WhatsApp Bot (WaSender edition).
 
-This module is the brain of the chatbot. It receives parsed webhook
-events (phone number + message content) from webhook.py and routes
-them to the correct handler based on the message type:
+Because WaSender does not support native WhatsApp interactive buttons or
+list menus, every menu is rendered as a plain-text keyword prompt.
+Students reply by typing a short keyword (e.g. "fee", "nss", "contact_cse").
 
-1. **Button/List Reply IDs**: If the incoming payload has a recognized
-   ID (e.g. 'about', 'fee', 'facilities'), the matching handler sends
-   the appropriate media/text response.
+Entry points:
+  - QR Code scan → student texts "hi" / "hello" / "start" / "cap1"
+  - Any unrecognized text → welcome + main menu (default fallback)
+  - Known keywords → exact handler dispatch
 
-2. **Plain Text Messages**: Any unrecognized text (e.g. "Hello DYP",
-   "hi", "menu") triggers the welcome message + main Options menu.
-
-Both entry points (QR code scan → text, and broadcast template →
-button reply) converge on the same main Options menu.
+All outbound calls go through app.meta_client which now routes to WaSenderAPI.
 """
 
 import logging
 
-from app.meta_client import send_text, send_image, send_document, send_list, send_buttons
+from app.meta_client import (
+    send_text,
+    send_image,
+    send_document,
+    send_list,
+    send_buttons,
+)
 from app.messages.content import (
     WELCOME_TEXT,
     ACK_FREEZE,
@@ -56,7 +59,14 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Menu Senders (reused across multiple handlers)
+# Greeting trigger words
+# ─────────────────────────────────────────────────────────────────────
+
+GREETING_TRIGGERS = {"hi", "hello", "start", "cap1", "hey", "hlo", "hii"}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Menu senders (reused across multiple handlers)
 # ─────────────────────────────────────────────────────────────────────
 
 def send_main_menu(phone: str) -> None:
@@ -86,17 +96,30 @@ def send_facilities_menu(phone: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Individual Handlers (one per menu option)
+# Individual handlers (one per menu option)
 # ─────────────────────────────────────────────────────────────────────
 
+def handle_welcome(phone: str) -> None:
+    """Send the initial welcome message + freeze / explore choice."""
+    send_buttons(
+        to=phone,
+        body_text=WELCOME_TEXT,
+        buttons=[
+            {"id": "freeze", "title": "✅ Freeze My Seat"},
+            {"id": "explore", "title": "👀 Explore Options"},
+        ],
+    )
+    update_session_state(phone, "welcome")
+
+
 def handle_freeze_admission(phone: str) -> None:
-    """User chose to freeze admission from the broadcast follow-up buttons."""
+    """User chose to freeze admission — show acknowledgment then main menu."""
     send_text(phone, ACK_FREEZE)
     send_main_menu(phone)
 
 
 def handle_explore_options(phone: str) -> None:
-    """User chose to explore options from the broadcast follow-up buttons."""
+    """User chose to explore options — show acknowledgment then main menu."""
     send_text(phone, ACK_EXPLORE)
     send_main_menu(phone)
 
@@ -176,7 +199,7 @@ def handle_nss(phone: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Talk to Us — Branch Contact Handlers
+# Talk to Us — Branch contact handlers
 # ─────────────────────────────────────────────────────────────────────
 
 def send_branch_contact_menu(phone: str) -> None:
@@ -207,75 +230,93 @@ def handle_branch_contact(phone: str, branch_id: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Handler Registry — maps button/list IDs to handler functions
+# Handler registry — maps typed keywords → handler functions
 # ─────────────────────────────────────────────────────────────────────
 
 HANDLER_MAP: dict[str, callable] = {
-    "freeze_admission": handle_freeze_admission,
-    "explore_options": handle_explore_options,
-    "about": handle_about,
-    "fee": handle_fee,
+    # Post-welcome choice
+    "freeze":           handle_freeze_admission,
+    "freeze_admission": handle_freeze_admission,  # legacy alias
+    "explore":          handle_explore_options,
+    "explore_options":  handle_explore_options,   # legacy alias
+
+    # Main menu
+    "menu":       send_main_menu,
+    "about":      handle_about,
+    "fee":        handle_fee,
     "placements": handle_placements,
-    "admission": handle_admission,
+    "admission":  handle_admission,
     "facilities": handle_facilities,
-    "bus": handle_bus,
+    "talk_to_us": handle_talk_to_us,
+    "contact":    handle_talk_to_us,  # user-friendly alias
+
+    # Facilities sub-menu
+    "bus":     handle_bus,
     "hostels": handle_hostels,
     "canteen": handle_canteen,
-    "ncc": handle_ncc,
-    "nss": handle_nss,
-    "talk_to_us": handle_talk_to_us,
+    "ncc":     handle_ncc,
+    "nss":     handle_nss,
 }
 
-# Dynamically register all branch contact IDs
+# Dynamically register all branch contact IDs from content.py
 for _branch_id in BRANCH_CONTACTS:
     HANDLER_MAP[_branch_id] = lambda phone, bid=_branch_id: handle_branch_contact(phone, bid)
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Master Router — single entry point called by webhook.py
+# Master router — single entry point called by webhook.py
 # ─────────────────────────────────────────────────────────────────────
 
 def route_message(phone: str, message_type: str, content: str) -> None:
     """Route an incoming message to the correct handler.
 
-    This is the single entry point called by webhook.py after parsing
-    the incoming Meta webhook payload.
+    Called by webhook.py (as a background task) after parsing the
+    incoming WaSender webhook payload.
 
     Args:
-        phone: Sender's WhatsApp phone number (E.164, no '+').
-        message_type: Either 'interactive' (button/list reply) or 'text'.
-        content: The button/list reply ID (if interactive) or the text body.
+        phone:        Sender's WhatsApp phone number (E.164, no '+').
+        message_type: Always 'text' from WaSender (no native interactive type).
+        content:      The raw text body typed by the student.
 
     Flow:
         1. Ensure a session exists for this phone number.
-        2. If the content matches a known handler ID → dispatch to that handler.
-        3. Otherwise (plain text) → send welcome + main menu.
+        2. If the text matches a greeting trigger → send welcome screen.
+        3. If the text matches a known handler keyword → dispatch.
+        4. Otherwise → default fallback: welcome + main menu.
     """
     # Ensure session exists and update last_active
     get_or_create_session(phone)
 
-    if message_type == "interactive" and content in HANDLER_MAP:
-        logger.info("Interactive reply: phone=%s, id=%s", phone, content)
-        HANDLER_MAP[content](phone)
-    elif message_type == "text" and content.lower().strip() in HANDLER_MAP:
-        # Allow users to type handler names directly (e.g. "about", "fee")
-        logger.info("Text shortcut: phone=%s, text=%s", phone, content)
-        HANDLER_MAP[content.lower().strip()](phone)
-    else:
-        # Default: any unrecognized text → welcome + main menu
-        logger.info("Plain text (default): phone=%s, text=%s", phone, content)
-        send_text(phone, WELCOME_TEXT)
-        send_main_menu(phone)
+    normalized = content.strip().lower()
 
+    # 1. Greeting triggers
+    if normalized in GREETING_TRIGGERS:
+        logger.info("Greeting: phone=%s, text=%s", phone, content)
+        handle_welcome(phone)
+        return
+
+    # 2. Known keyword → dispatch
+    if normalized in HANDLER_MAP:
+        logger.info("Keyword match: phone=%s, keyword=%s", phone, normalized)
+        HANDLER_MAP[normalized](phone)
+        return
+
+    # 3. Default fallback — any unrecognized text shows welcome + main menu
+    logger.info("Unrecognized text (default): phone=%s, text=%s", phone, content)
+    send_text(phone, WELCOME_TEXT)
+    send_main_menu(phone)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Broadcast helper (used by scripts/send_broadcast.py)
+# ─────────────────────────────────────────────────────────────────────
 
 def send_broadcast_followup(phone: str) -> None:
     """Send the post-broadcast follow-up buttons (Freeze / Explore).
 
     Called by scripts/send_broadcast.py after sending the congrats
-    template to each admitted student. The student then taps one of
-    the two buttons, which comes back through the webhook and routes
-    to handle_freeze_admission or handle_explore_options — both of
-    which eventually show the main Options menu.
+    message to each admitted student. The student replies by typing
+    'freeze' or 'explore', which the webhook routes back here.
     """
     send_buttons(
         to=phone,

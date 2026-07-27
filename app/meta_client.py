@@ -1,122 +1,166 @@
-import httpx
-from typing import Optional
-from app.config import settings
+"""
+WaSenderAPI client adapter for the DYP Admissions WhatsApp Bot.
 
-BASE_URL = f"https://graph.facebook.com/v21.0/{settings.META_PHONE_NUMBER_ID}/messages"
+Previously this module talked to Meta's Graph API. It now routes all
+outbound messages through WaSenderAPI (https://wasenderapi.com).
+
+Because WaSender does not support native WhatsApp interactive buttons or
+list menus, every send_buttons() / send_list() call is converted into a
+plain-text numbered menu so students can reply by typing a short keyword.
+"""
+
+import logging
+import os
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+WASENDER_TOKEN = os.getenv("WASENDER_API_TOKEN", "")
+API_URL = "https://wasenderapi.com/api/send-message"
 
 HEADERS = {
-    "Authorization": f"Bearer {settings.META_ACCESS_TOKEN}",
+    "Authorization": f"Bearer {WASENDER_TOKEN}",
     "Content-Type": "application/json",
 }
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Internal helper
+# ─────────────────────────────────────────────────────────────────────
+
 def _post(payload: dict) -> dict:
-    """Internal helper: sends the payload to Meta and returns the JSON response."""
-    with httpx.Client(timeout=15.0) as client:
-        response = client.post(BASE_URL, headers=HEADERS, json=payload)
+    """POST a message payload to WaSender and return the JSON response."""
+    try:
+        response = requests.post(API_URL, headers=HEADERS, json=payload, timeout=15)
         response.raise_for_status()
         return response.json()
+    except requests.RequestException as exc:
+        logger.error("WaSender API error: %s", exc)
+        raise
 
+
+# ─────────────────────────────────────────────────────────────────────
+# Core send functions
+# ─────────────────────────────────────────────────────────────────────
 
 def send_text(to: str, body: str) -> dict:
+    """Send a plain text message via WaSender."""
     payload = {
-        "messaging_product": "whatsapp",
         "to": to,
         "type": "text",
-        "text": {"body": body},
-    }
-    return _post(payload)
-
-
-def send_template(to: str, template_name: str, language_code: str = "en_US", parameters: list[str] | None = None) -> dict:
-    components = []
-    if parameters:
-        components.append({
-            "type": "body",
-            "parameters": [{"type": "text", "text": p} for p in parameters],
-        })
-
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "template",
-        "template": {
-            "name": template_name,
-            "language": {"code": language_code},
-            "components": components,
-        },
+        "message": body,
     }
     return _post(payload)
 
 
 def send_image(to: str, image_url: str, caption: str = "") -> dict:
+    """Send an image message via WaSender."""
     payload = {
-        "messaging_product": "whatsapp",
         "to": to,
         "type": "image",
-        "image": {"link": image_url, "caption": caption},
+        "url": image_url,
+        "caption": caption,
     }
     return _post(payload)
 
 
 def send_document(to: str, document_url: str, filename: str, caption: str = "") -> dict:
+    """Send a document/PDF message via WaSender."""
     payload = {
-        "messaging_product": "whatsapp",
         "to": to,
         "type": "document",
-        "document": {"link": document_url, "filename": filename, "caption": caption},
+        "url": document_url,
+        "caption": caption,
+        "filename": filename,
     }
     return _post(payload)
 
 
-def send_video(to: str, video_url: str, caption: str = "") -> dict:
+def send_media(to: str, media_type: str, link: str, caption: str, filename: str = None) -> dict:
+    """Generic media sender — routes to image or document based on media_type."""
     payload = {
-        "messaging_product": "whatsapp",
         "to": to,
-        "type": "video",
-        "video": {"link": video_url, "caption": caption},
+        "type": media_type,
+        "url": link,
+        "caption": caption,
     }
+    if filename:
+        payload["filename"] = filename
     return _post(payload)
 
+
+# ─────────────────────────────────────────────────────────────────────
+# Menu conversion helpers
+# ─────────────────────────────────────────────────────────────────────
 
 def send_buttons(to: str, body_text: str, buttons: list[dict]) -> dict:
     """
-    buttons format: [{"id": "freeze_admission", "title": "Freeze Admission"}, ...]
-    Max 3 buttons allowed by WhatsApp.
+    Convert Meta-style reply buttons into a plain-text numbered menu.
+
+    buttons format: [{"id": "freeze", "title": "Freeze Admission"}, ...]
+    Rendered as:
+        <body_text>
+
+        👉 Type *freeze* for Freeze Admission
+        👉 Type *explore* for Explore Options
     """
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "interactive",
-        "interactive": {
-            "type": "button",
-            "body": {"text": body_text},
-            "action": {
-                "buttons": [
-                    {"type": "reply", "reply": {"id": b["id"], "title": b["title"]}}
-                    for b in buttons
-                ]
-            },
-        },
-    }
-    return _post(payload)
+    menu_text = body_text + "\n\n"
+    for b in buttons:
+        menu_text += f"👉 Type *{b['id']}* for {b['title']}\n"
+    return send_text(to, menu_text.rstrip())
 
 
-def send_list(to: str, header: str, body: str, footer: str, button_text: str, sections: list[dict]) -> dict:
+def send_list(
+    to: str,
+    header: str,
+    body: str,
+    footer: str,
+    button_text: str,
+    sections: list[dict],
+) -> dict:
     """
-    sections format:
+    Convert a Meta interactive list menu into a plain-text keyword menu.
+
+    sections format (Meta style):
     [{"title": "Info & Admission", "rows": [{"id": "about", "title": "About DYPCET", "description": "..."}]}]
+
+    Rendered as:
+        *HEADER*
+        body
+
+        📚 Info & Admission
+        👉 Type *about* : About DYPCET
+        👉 Type *fee*   : Fee Structure
+        ...
     """
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "interactive",
-        "interactive": {
-            "type": "list",
-            "header": {"type": "text", "text": header},
-            "body": {"text": body},
-            "footer": {"text": footer},
-            "action": {"button": button_text, "sections": sections},
-        },
-    }
-    return _post(payload)
+    menu_text = f"*{header}*\n{body}\n"
+    for section in sections:
+        section_title = section.get("title", "")
+        if section_title:
+            menu_text += f"\n*{section_title}*\n"
+        for row in section.get("rows", []):
+            row_id = row.get("id", "")
+            row_title = row.get("title", "")
+            menu_text += f"👉 Type *{row_id}* : {row_title}\n"
+    if footer:
+        menu_text += f"\n_{footer}_"
+    return send_text(to, menu_text.rstrip())
+
+
+def send_template(to: str, template_name: str, language_code: str = "en_US", parameters: list[str] | None = None) -> dict:
+    """
+    Template messages are not natively supported by WaSender in the same
+    way as Meta. We fall back to a plain-text message that mirrors the
+    template body for now.
+    """
+    logger.warning(
+        "send_template() called for template '%s' — WaSender does not support Meta templates. "
+        "Sending a plain text fallback.",
+        template_name,
+    )
+    fallback = (
+        "🎓 Congratulations on your admission to DYPCET!\n\n"
+        "We're excited to welcome you. Type *hi* or *start* to explore your new campus."
+    )
+    return send_text(to, fallback)
