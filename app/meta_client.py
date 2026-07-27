@@ -1,12 +1,20 @@
 """
 WaSenderAPI client adapter for the DYP Admissions WhatsApp Bot.
 
-Previously this module talked to Meta's Graph API. It now routes all
-outbound messages through WaSenderAPI (https://wasenderapi.com).
+Confirmed correct WaSender API payload shapes (from live 422 error debugging):
+  Text:     { "to": "+91...", "text": "..." }
+  Image:    { "to": "+91...", "text": "<caption>", "imageUrl": "https://..." }
+  Document: { "to": "+91...", "text": "<caption>", "documentUrl": "https://...", "fileName": "file.pdf" }
+
+Key rules:
+  - Phone number MUST start with '+' (E.164 format)
+  - Text content goes in the "text" key (NOT "message")
+  - Media URLs use "imageUrl" / "documentUrl" (NOT "url")
+  - No "type" field needed — WaSender infers from payload shape
 
 Because WaSender does not support native WhatsApp interactive buttons or
-list menus, every send_buttons() / send_list() call is converted into a
-plain-text numbered menu so students can reply by typing a short keyword.
+list menus, send_buttons() and send_list() are converted to plain-text
+keyword menus automatically.
 """
 
 import logging
@@ -26,17 +34,29 @@ HEADERS = {
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Internal helper
+# Helpers
 # ─────────────────────────────────────────────────────────────────────
 
-def _post(payload: dict) -> dict:
-    """POST a message payload to WaSender and return the JSON response."""
+def _e164(phone: str) -> str:
+    """Ensure the phone number starts with '+' as WaSender requires E.164 format."""
+    return phone if phone.startswith("+") else f"+{phone}"
+
+
+def _post(payload: dict) -> requests.Response:
+    """POST a message payload to WaSender. Logs errors but lets caller handle raises."""
     try:
         response = requests.post(API_URL, headers=HEADERS, json=payload, timeout=15)
         response.raise_for_status()
-        return response.json()
+        return response
+    except requests.HTTPError as exc:
+        logger.error(
+            "WaSender API HTTP error: %s — Response body: %s",
+            exc,
+            exc.response.text if exc.response is not None else "N/A",
+        )
+        raise
     except requests.RequestException as exc:
-        logger.error("WaSender API error: %s", exc)
+        logger.error("WaSender API request error: %s", exc)
         raise
 
 
@@ -44,66 +64,74 @@ def _post(payload: dict) -> dict:
 # Core send functions
 # ─────────────────────────────────────────────────────────────────────
 
-def send_text(to: str, body: str) -> dict:
+def send_text(to: str, body: str) -> requests.Response:
     """Send a plain text message via WaSender."""
     payload = {
-        "to": to,
-        "type": "text",
-        "message": body,
+        "to": _e164(to),
+        "text": body,          # ← WaSender uses "text", not "message"
     }
     return _post(payload)
 
 
-def send_image(to: str, image_url: str, caption: str = "") -> dict:
-    """Send an image message via WaSender."""
+def send_image(to: str, image_url: str, caption: str = "") -> requests.Response:
+    """Send an image with optional caption via WaSender."""
     payload = {
-        "to": to,
-        "type": "image",
-        "url": image_url,
-        "caption": caption,
+        "to": _e164(to),
+        "text": caption,       # caption goes in "text"
+        "imageUrl": image_url, # ← "imageUrl", not "url"
     }
     return _post(payload)
 
 
-def send_document(to: str, document_url: str, filename: str, caption: str = "") -> dict:
-    """Send a document/PDF message via WaSender."""
+def send_document(
+    to: str, document_url: str, filename: str, caption: str = ""
+) -> requests.Response:
+    """Send a document/PDF with optional caption via WaSender."""
     payload = {
-        "to": to,
-        "type": "document",
-        "url": document_url,
-        "caption": caption,
-        "filename": filename,
+        "to": _e164(to),
+        "text": caption,            # caption goes in "text"
+        "documentUrl": document_url, # ← "documentUrl", not "url"
+        "fileName": filename,        # ← "fileName" (camelCase)
     }
     return _post(payload)
 
 
-def send_media(to: str, media_type: str, link: str, caption: str, filename: str = None) -> dict:
-    """Generic media sender — routes to image or document based on media_type."""
-    payload = {
-        "to": to,
-        "type": media_type,
-        "url": link,
-        "caption": caption,
-    }
-    if filename:
-        payload["filename"] = filename
+def send_media(
+    to: str, media_type: str, link: str, caption: str, filename: str = None
+) -> requests.Response:
+    """Generic media sender — routes to image or document payload shape."""
+    if media_type == "document":
+        payload = {
+            "to": _e164(to),
+            "text": caption,
+            "documentUrl": link,
+        }
+        if filename:
+            payload["fileName"] = filename
+    else:
+        # image, video, etc.
+        payload = {
+            "to": _e164(to),
+            "text": caption,
+            "imageUrl": link,
+        }
     return _post(payload)
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Menu conversion helpers
+# Menu conversion helpers (buttons → plain-text keyword menus)
 # ─────────────────────────────────────────────────────────────────────
 
-def send_buttons(to: str, body_text: str, buttons: list[dict]) -> dict:
+def send_buttons(to: str, body_text: str, buttons: list[dict]) -> requests.Response:
     """
-    Convert Meta-style reply buttons into a plain-text numbered menu.
+    Convert Meta-style reply buttons into a plain-text keyword menu.
 
     buttons format: [{"id": "freeze", "title": "Freeze Admission"}, ...]
     Rendered as:
         <body_text>
 
-        👉 Type *freeze* for Freeze Admission
-        👉 Type *explore* for Explore Options
+        👉 Type *freeze* for ✅ Freeze My Seat
+        👉 Type *explore* for 👀 Explore Options
     """
     menu_text = body_text + "\n\n"
     for b in buttons:
@@ -118,21 +146,22 @@ def send_list(
     footer: str,
     button_text: str,
     sections: list[dict],
-) -> dict:
+) -> requests.Response:
     """
     Convert a Meta interactive list menu into a plain-text keyword menu.
 
     sections format (Meta style):
-    [{"title": "Info & Admission", "rows": [{"id": "about", "title": "About DYPCET", "description": "..."}]}]
+    [{"title": "Info & Admission", "rows": [{"id": "about", "title": "About DYPCET"}]}]
 
     Rendered as:
         *HEADER*
         body
 
-        📚 Info & Admission
-        👉 Type *about* : About DYPCET
-        👉 Type *fee*   : Fee Structure
+        *Info & Admission*
+        👉 Type *about* : 🏛️ About DYPCET
+        👉 Type *fee* : 💰 Fee Structure
         ...
+        _footer_
     """
     menu_text = f"*{header}*\n{body}\n"
     for section in sections:
@@ -148,14 +177,18 @@ def send_list(
     return send_text(to, menu_text.rstrip())
 
 
-def send_template(to: str, template_name: str, language_code: str = "en_US", parameters: list[str] | None = None) -> dict:
+def send_template(
+    to: str,
+    template_name: str,
+    language_code: str = "en_US",
+    parameters: list[str] | None = None,
+) -> requests.Response:
     """
-    Template messages are not natively supported by WaSender in the same
-    way as Meta. We fall back to a plain-text message that mirrors the
-    template body for now.
+    WaSender does not support Meta template messages.
+    Falls back to a plain-text congratulations message.
     """
     logger.warning(
-        "send_template() called for template '%s' — WaSender does not support Meta templates. "
+        "send_template() called for '%s' — WaSender does not support Meta templates. "
         "Sending a plain text fallback.",
         template_name,
     )
