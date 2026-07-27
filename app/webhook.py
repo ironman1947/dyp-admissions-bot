@@ -7,12 +7,16 @@ Two endpoints:
                   parses the payload, and dispatches to flow_logic.route_message()
                   via a background task so we return 200 OK immediately.
 
-WaSender webhook payload structure (may vary slightly by plan/version):
+Confirmed WaSender webhook payload structure (from live logs):
 {
   "data": {
-    "from": "919876543210@c.us",   # or @s.whatsapp.net
-    "messageBody": "hello",         # or "body" / "message"
-    "type": "chat"
+    "messages": {
+      "messageBody": "cap1",
+      "key": {
+        "cleanedSenderPn": "918421382779",
+        "senderPn": "918421382779@c.us"
+      }
+    }
   }
 }
 """
@@ -36,49 +40,56 @@ router = APIRouter()
 def _extract_wasender_message(data: dict[str, Any]) -> tuple[str, str] | None:
     """Extract (clean_phone, message_text) from a WaSender webhook payload.
 
-    WaSender wraps the actual message inside a "data" key in some plans.
-    We try multiple known field names defensively so minor API changes
-    don't break the bot.
+    Tries the confirmed nested structure first (data → messages → key),
+    then falls back to the flat structure (data → from / messageBody) so
+    the bot stays resilient to any future WaSender API changes.
 
     Returns:
         A tuple (phone, text) if a valid user message was found, else None.
     """
     try:
-        # Some WaSender payloads nest data under a "data" key
-        body = data.get("data", data)
+        payload_data = data.get("data", {})
 
-        # Sender field variants
+        # ── Path 1: Confirmed nested structure (data.messages.key) ──────────
+        messages_obj = payload_data.get("messages", {})
+        message_text: str = messages_obj.get("messageBody", "")
+
+        key_obj = messages_obj.get("key", {})
         sender: str = (
-            body.get("from")
-            or body.get("sender")
-            or ""
+            key_obj.get("cleanedSenderPn")
+            or key_obj.get("senderPn", "")
         )
 
-        # Message body field variants
-        message_text: str = (
-            body.get("messageBody")
-            or body.get("body")
-            or body.get("message")
-            or ""
-        )
+        # ── Path 2: Flat fallback (data.from / data.messageBody) ────────────
+        if not sender:
+            sender = (
+                payload_data.get("from")
+                or payload_data.get("sender")
+                or data.get("from")
+                or ""
+            )
+        if not message_text:
+            message_text = (
+                payload_data.get("messageBody")
+                or payload_data.get("body")
+                or payload_data.get("message")
+                or ""
+            )
 
         if not sender or not message_text:
+            logger.debug("Could not extract sender or message_text from payload.")
             return None
 
-        # Strip WhatsApp JID suffixes to get a clean E.164-style phone number
-        clean_sender = (
-            sender
-            .replace("@c.us", "")
-            .replace("@s.whatsapp.net", "")
-            .replace("@g.us", "")   # ignore group messages
-        )
+        # Strip any leftover WhatsApp JID suffix (@c.us / @s.whatsapp.net)
+        if "@" in sender:
+            sender = sender.split("@")[0]
 
-        # Skip group messages (they contain a hyphen in the group JID prefix)
-        if "@g.us" in sender:
+        # Skip group messages (group JIDs contain a hyphen before @g.us)
+        if payload_data.get("isGroup") or messages_obj.get("isGroup"):
             logger.debug("Ignoring group message from %s", sender)
             return None
 
-        return (clean_sender, message_text)
+        return (sender, message_text)
 
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to parse WaSender payload: %s", exc)
@@ -108,7 +119,7 @@ async def wasender_webhook(
 
     Steps:
       1. Parse the raw JSON payload.
-      2. Extract sender phone + message text.
+      2. Extract sender phone + message text from the nested structure.
       3. Dispatch route_message() as a background task (non-blocking).
       4. Return {"status": "success"} immediately so WaSender knows we
          received the event.
@@ -127,7 +138,7 @@ async def wasender_webhook(
         return {"status": "ok", "detail": "no message"}
 
     clean_sender, message_text = extracted
-    logger.info("Message from %s: %s", clean_sender, message_text)
+    logger.info("Dispatching: phone=%s, text=%s", clean_sender, message_text)
 
     # Dispatch to flow logic as a background task so we return 200 immediately
     background_tasks.add_task(route_message, clean_sender, "text", message_text)
